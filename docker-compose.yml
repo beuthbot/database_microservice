@@ -1,0 +1,9 @@
+version: '3.7'
+services:
+  registry:
+    build: .
+    restart: unless-stopped
+    ports:
+      - 9922:3000
+    environment:
+        -DATABASE_ENDPOINT
