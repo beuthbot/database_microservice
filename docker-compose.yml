@@ -1,9 +1,9 @@
 version: '3.7'
 services:
-  registry:
+  database_microservice:
     build: .
     restart: unless-stopped
     ports:
-      - 9922:3000
+      - 27016:3000
     environment:
-        -DATABASE_ENDPOINT
+      - DATABASE_ENDPOINT
