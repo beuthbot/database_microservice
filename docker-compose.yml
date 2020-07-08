@@ -4,6 +4,12 @@ services:
     build: .
     restart: unless-stopped
     ports:
-      - 27016:3000
+      - 27016:27016
     environment:
-      - DATABASE_ENDPOINT
+      - DATABASE_ENDPOINT=http://host.docker.internal:27000
+
+networks:
+  beuthbot: {}
+  default:
+    external:
+      name: beuthbot_network
