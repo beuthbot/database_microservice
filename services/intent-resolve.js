@@ -65,7 +65,7 @@ async function databaseGet(message) {
         }
 
         let detailName = detailEntity.entity
-        if (detailName) {
+        if (detailName && detailName !== "all-details") {
 
             // the name of the entity will always have "detail-" prefix
             detailName = detailName.replace("detail-", "")
