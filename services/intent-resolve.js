@@ -53,26 +53,55 @@ async function databaseGet(message) {
     console.debug("beuthBotID: " + beuthBotID)
 
     let userDetailsResponse = await axios.get(`${url}/users/${beuthBotID}/detail`)
-    let userDetails = userDetailsResponse.data
+    let user = userDetailsResponse.data
 
-    console.debug("userDetails:\n" + util.inspect(userDetails, false, null, true))
+    console.debug("user:\n" + util.inspect(user, false, null, true))
 
-    if (userDetails) {
+    if (user) {
 
-        let userDetailsString = "Deine Daten:\n\n"
-
-        if (userDetails.nickname) { userDetailsString += "Nickname: **" + userDetails.nickname + "**\n" }
-        if (userDetails.firstName) { userDetailsString += "Vorname: **" + userDetails.firstName + "**\n" }
-        if (userDetails.lastName) { userDetailsString += "Nachname: **" + userDetails.lastName + "**\n" }
-        userDetailsString += "\n"
-
-        if (userDetails.details) {
-            for (const [ key, value ] of Object.entries(userDetails.details)) {
-                userDetailsString += String(key) + ": **" + value + "**\n"
-            }
+        const detailEntity = findDetailsEntity(message)
+        if (!detailEntity) {
+            return createDefaultErrorAnswer("can't find detail entity")
         }
 
-        return createAnswer(userDetailsString)
+        let detailName = detailEntity.entity
+        if (detailName) {
+
+            // the name of the entity will always have "detail-" prefix
+            detailName = detailName.replace("detail-", "")
+
+            if (user.details) {
+                let valueCandidate = user.details[detailName]
+                if (valueCandidate) {
+                    return createAnswer(valueCandidate)
+                } else {
+                    return createErrorAnswer(
+                        "Das kann ich nicht finden.",
+                        `No detail with name '${detailName}'`
+                    )
+                }
+
+            } else {
+                return createDefaultErrorAnswer("invalid user")
+            }
+
+        } else {
+
+            let userDetailsString = "Deine Daten:\n\n"
+
+            if (user.nickname) { userDetailsString += "Nickname: **" + user.nickname + "**\n" }
+            if (user.firstName) { userDetailsString += "Vorname: **" + user.firstName + "**\n" }
+            if (user.lastName) { userDetailsString += "Nachname: **" + user.lastName + "**\n" }
+            userDetailsString += "\n"
+
+            if (user.details) {
+                for (const [ key, value ] of Object.entries(user.details)) {
+                    userDetailsString += String(key) + ": **" + value + "**\n"
+                }
+            }
+
+            return createAnswer(userDetailsString)
+        }
     } else {
         return createErrorAnswer(
             "Das kann ich nicht finden.",
