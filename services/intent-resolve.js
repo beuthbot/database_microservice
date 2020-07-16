@@ -186,7 +186,8 @@ async function databaseRemove(message) {
     }
 
     if (detailName === "all-details") {
-        return axios.delete(`${url}/users/${beuthBotID}/detail`)
+        await axios.delete(`${url}/users/${beuthBotID}/detail`)
+        return createAnswer(`Ich habe alle Details gelöscht.`)
     }
 
     // the name of the entity will always have "detail-" prefix
@@ -265,7 +266,7 @@ function findDetailsEntity(message) {
         if (entityName) {
             if (entityName.startsWith("detail")) {
                 return entity
-            } else if (entity === "all-details") {
+            } else if (entityName === "all-details") {
                 return entity
             }
         }
