@@ -7,6 +7,8 @@ router.post('/', function (req, res, next) {
 
     const message = req.body
 
+    console.log("$$$$ resolve data")
+
     if (!message) {
         return createDefaultErrorAnswer("no message given")
     }

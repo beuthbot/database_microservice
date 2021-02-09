@@ -31,11 +31,17 @@ async function resolve(intent) {
 
     switch (message.intent.name) {
         case 'database-get':
-            return databaseGet(message);
+            return await databaseGet(message);
         case 'database-set':
-            return databaseSet(message);
+            return await databaseSet(message);
         case 'database-remove':
-            return databaseRemove(message);
+            return await databaseRemove(message);
+        case 'link-user-get':
+            return await triggerAccountRegister(message);
+        case 'link-user-set':
+            return await verifyAccountRegister(message);
+        case 'link-user-remove':
+            return await deleteAccount(message);
         default:
             return createErrorAnswer(
                 "Das kann ich nicht.",
@@ -43,6 +49,10 @@ async function resolve(intent) {
             )
     }
 }
+
+/**************************************************
+ **************** database service ****************
+ **************************************************/
 
 /**
  * GET operation on the database via REST to retrieve the details of a user
@@ -96,7 +106,10 @@ async function databaseGet(message) {
 
             if (user.details) {
                 for (const [ key, value ] of Object.entries(user.details)) {
-                    userDetailsString += String(key) + ": **" + value + "**\n"
+                    // filter register-code data
+                    if(!String(key) === "code" || !String(key) === "code-timestamp" ){
+                        userDetailsString += String(key) + ": **" + value + "**\n"
+                    }
                 }
             }
 
@@ -229,11 +242,153 @@ async function databaseRemove(message) {
         return createDefaultErrorAnswer("no response from database")
     }
 
-    console.debug("databseResponse: " + util.inspect(databaseResponse, false, null, true))
+    console.debug("databaseResponse: " + util.inspect(databaseResponse, false, null, true))
 
     return createAnswer(`Ich habe das Detail '${detailName}' gelöscht.`)
 
 }
+
+/**************************************************
+ **************** register service ****************
+ **************************************************/
+
+/**
+ * function to start the registration process. generates and stores a code to register a different messenger to the current user account
+ * @param message - incoming message
+ * @returns answer with the generated code
+ */
+async function triggerAccountRegister(message){
+    // check user
+    if(!message.user || !message.user.id){
+        return createErrorAnswer("Die Benutzerregistrierung konnte nicht gestartet werden","no user found in message")
+    }
+    // create code
+    let code = generateCode()
+    // safe code as detail with timestamp
+    let userId = message.user.id
+    let codeResponse = await axios.post(`${url}/users/register/code`,{
+        id: userId,
+        code: code,
+        timestamp: Date.now()
+    })
+    // check answer
+    if(codeResponse.data.ok === 1 && codeResponse.data.insertedCount === 1){
+        return createAnswer("Der Verifizierungs-Code lautet: " + code + "\n Der Code gilt für die nächsten 15 Minuten.")
+    } else if(codeResponse.retry){
+        // if retry ist true, the generated code is already used AND active, so we retry the account registration
+        return await triggerAccountRegister(message)
+    } else if(!codeResponse.retry && !codeResponse.success){
+        return createErrorAnswer("Die Benutzerregistrierung konnte nicht gestartet werden","no positive response from database")
+    } else {
+        return createErrorAnswer("Die Benutzerregistrierung konnte nicht gestartet werden","no response from database")
+    }
+}
+
+/**
+ * function to verify a user registration with a given code in the message
+ * @param message - incoming message
+ * @returns answer that indicates success or failure of registration
+ */
+async function verifyAccountRegister(message){
+    // check user
+    if(!message.user && !message.user.id){
+        return createErrorAnswer("Die Benutzerverifizierung konnte nicht gestartet werden","no user found in message")
+    }
+    // get data from user message
+    let entity = findEntity(message,"linkingcode")
+    let userCode = entity.value
+    let user = message.user
+
+    if(!userCode){
+        return createErrorAnswer("Es wurde kein Registrierungs-Code gefunden","no registration-code given")
+    }
+    // search code in user-database
+    let userDetailsResponse = await axios.get(`${url}/users/register/code/${userCode}`)
+    console.log(userDetailsResponse)
+    if(userDetailsResponse.success && !userDetailsResponse.success){
+        return createErrorAnswer("Der angegebene Registrierungs-Code ist falsch","wrong registration-code given")
+    }
+    // read register data from response
+    let databaseCode = userDetailsResponse.data.code
+    let databaseTimestamp = userDetailsResponse.data.time
+    let databaseUserId = userDetailsResponse.data.userid
+    // compare data
+    // code expired after 15 minutes
+    let timeoutTime = 900000
+    if(parseInt(databaseCode) === parseInt(userCode) && (Date.now() - databaseTimestamp) < timeoutTime){
+        // get linked/main user from database
+        let mainUserResponse = await axios.get(`${url}/users/${databaseUserId}`)
+        let mainUser = mainUserResponse.data
+        // check if user from message has other accounts registered
+        let userRegisterResponse
+        if(user.messengerIDs.length > 1){
+            // merge both users
+            userRegisterResponse = await axios.post(`${url}/users/register/merge/`,{
+                users: [mainUser,user]
+            })
+        } else {
+            // register messenger to user
+            userRegisterResponse = await axios.post(`${url}/users/register/`,{
+                user: mainUser,
+                accountData: {
+                    messenger: user.messengerIDs[0].messenger,
+                    id: user.messengerIDs[0].id
+                }
+            })
+        }
+        if(userRegisterResponse.data.ok === 1 && userRegisterResponse.data.nModified === 1){
+            // delete beuthbot user from message
+            let deleteResponse = await axios.delete(`${url}/users/${user.id}`)
+            console.log(deleteResponse)
+            return createAnswer("Deine Messenger wurden erfolgreich verbunden!")
+        } else{
+            return createErrorAnswer("Deine Messenger konnten nicht erfolgreich verbunden werden","negative register response")
+        }
+    } else {
+        if(!databaseCode === userCode){
+            console.log("A")
+            return createErrorAnswer("Die eingegebene Code ist falsch","wrong registration-code given")
+        } else {
+            console.log("B")
+            return createErrorAnswer("Der Code ist bereits abgelaufen, bitte starte die Registrierung erneut","code timeout")
+        }
+    }
+}
+
+/**
+ * function to delete a given messenger account from the user
+ * @param message - incoming message
+ * @returns answer that indicates success or failure of account deletion
+ */
+async function deleteAccount(message){
+    if(!message.user && !message.user.id){
+        return createErrorAnswer("Das Löschen des Accounts konnte nicht gestartet werden","no user found in message")
+    }
+    // get data from message
+    let user = message.user
+    let messengerEntity = findEntity(message, "messenger")
+    let messenger = messengerEntity.value.toLowerCase()
+    // check messenger
+    if(messenger){
+        // delete messenger from user
+        let deleteResult = await axios.delete(`${url}/users/register/`,{data: {
+                user: user,
+                messenger: messenger
+            }})
+        // check result
+        if(deleteResult.data.ok === 1 && deleteResult.data.nModified === 1){
+            return createAnswer("Dein Messenger wurden erfolgreich gelöscht!")
+        } else {
+            return createErrorAnswer("Dein Messenger konnte nicht erfolgreich gelöscht werden","delete result failed")
+        }
+    } else {
+        return createErrorAnswer("Es wurde kein Messenger gefunden zum entfernen","no messenger given")
+    }
+}
+
+/**************************************************
+ **************** helper functions ****************
+ **************************************************/
 
 function createAnswer(text) {
     return new Promise((resolve) => {
@@ -280,6 +435,8 @@ function getBeuthBotID(message) {
 function findEntity(message, name) {
     if (!message.entities) { return null }
     if (!message.entities.length) { return null }
+    // user can't have access to register-code data
+    if (name === "code" || name === "code-timestamp") { return null }
     for (let i = 0; i < message.entities.length; i++) {
         let entity = message.entities[i]
         if (entity.entity === name) { return entity }
@@ -302,6 +459,16 @@ function findDetailsEntity(message) {
     }
 }
 
+function generateCode(){
+    let numCode = ""
+    while(numCode.length < 6){
+        // generate number between 0 and 9
+        let randomNum = Math.floor(Math.random() * 10)
+        // append to existing number
+        numCode += randomNum.toString()
+    }
+    return numCode
+}
 /**
  * exports only the resolve function, since it is the only one needed from outside the file
  */
